@@ -1,12 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // Use standalone output only for Docker/self-hosted deployments.
+  // Vercel handles its own serverless output format automatically.
+  ...(process.env.BUILD_STANDALONE === "true" ? { output: "standalone" } : {}),
 
   // Enable server-side environment variables
   serverExternalPackages: ["@prisma/client", "ioredis"],
 
-  // Image optimization for Docker
+  // Image optimization
   images: {
     remotePatterns: [
       {

@@ -18,7 +18,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=prisma /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=prisma /app/node_modules/@prisma ./node_modules/@prisma
 COPY . .
-RUN corepack enable pnpm && pnpm build
+RUN corepack enable pnpm && BUILD_STANDALONE=true pnpm build
 
 # ── Stage 4: Production runner ─────────────────────────────────────────────
 FROM node:20-alpine AS runner
