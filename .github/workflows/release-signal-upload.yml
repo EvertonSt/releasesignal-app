@@ -1,0 +1,132 @@
+# ── ReleaseSignal CI Upload ─────────────────────────────────────────────────
+# Example GitHub Actions workflow that uploads Playwright test results
+# to ReleaseSignal after each test run.
+#
+# Setup:
+#   1. Add RELEASESIGNAL_API_KEY to your repository secrets
+#   2. Add RELEASESIGNAL_API_URL (e.g., https://your-domain.com)
+#   3. Ensure your test framework outputs JSON results
+#
+# This workflow:
+#   - Runs Playwright E2E tests
+#   - Parses test results into ReleaseSignal format
+#   - Uploads results via the /api/ingress endpoint
+#   - Reports the gate decision back to GitHub
+
+name: E2E Tests + ReleaseSignal
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps
+
+      - name: Run Playwright tests
+        id: playwright
+        run: |
+          pnpm exec playwright test --reporter=json > test-results.json || true
+          echo "tests_completed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to ReleaseSignal
+        if: steps.playwright.outputs.tests_completed == 'true'
+        continue-on-error: true
+        env:
+          RELEASESIGNAL_API_KEY: ${{ secrets.RELEASESIGNAL_API_KEY }}
+          RELEASESIGNAL_API_URL: ${{ secrets.RELEASESIGNAL_API_URL || 'http://localhost:3000' }}
+        run: |
+          # Parse Playwright JSON output and convert to ReleaseSignal format
+          node -e "
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('test-results.json', 'utf8'));
+
+            const suites = results.suites.map(suite => ({
+              name: suite.title,
+              file: suite.file,
+              tests: suite.specs.map(spec => {
+                const test = spec.tests[0];
+                const result = test?.results[0];
+                return {
+                  id: spec.testId || spec.title,
+                  title: spec.title,
+                  fullTitle: suite.title + ' > ' + spec.title,
+                  status: result?.status === 'passed' ? 'passed'
+                    : result?.status === 'failed' ? 'failed'
+                    : result?.status === 'timedOut' ? 'timed_out'
+                    : 'skipped',
+                  duration: result?.duration || 0,
+                  retries: result?.retry || 0,
+                  errorMessage: result?.error?.message || undefined,
+                  stackTrace: result?.error?.stack || undefined,
+                  browser: results.config?.browser?.name || undefined,
+                };
+              }),
+            }));
+
+            const payload = {
+              repository: process.env.GITHUB_REPOSITORY,
+              branch: process.env.GITHUB_REF_NAME,
+              commit: process.env.GITHUB_SHA,
+              workflow: 'E2E Tests',
+              workflowRunId: process.env.GITHUB_RUN_ID,
+              trigger: process.env.GITHUB_EVENT_NAME === 'pull_request' ? 'pull_request' : 'push',
+              actor: process.env.GITHUB_ACTOR,
+              environment: 'ci',
+              browser: results.config?.browser?.name,
+              suites: suites,
+              idempotencyKey: process.env.GITHUB_RUN_ID + '-' + process.env.GITHUB_RUN_ATTEMPT,
+              metadata: {
+                runNumber: process.env.GITHUB_RUN_NUMBER,
+                sha: process.env.GITHUB_SHA,
+                ref: process.env.GITHUB_REF,
+              },
+            };
+
+            fetch(process.env.RELEASESIGNAL_API_URL + '/api/ingress', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + process.env.RELEASESIGNAL_API_KEY,
+              },
+              body: JSON.stringify(payload),
+            })
+            .then(res => res.json())
+            .then(data => {
+              console.log('ReleaseSignal response:', JSON.stringify(data, null, 2));
+              if (data.success) {
+                console.log('Gate decision:', data.data.gateDecision);
+              } else {
+                console.error('Upload failed:', data.error);
+              }
+            })
+            .catch(err => console.error('Upload error:', err.message));
+          "
+
+      - name: Upload test results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: test-results.json
+          retention-days: 7
