@@ -7,7 +7,7 @@ import { MobileNavProvider } from '@/contexts/mobile-nav-context';
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <MobileNavProvider>
-      <div className="dark flex flex-col h-screen">
+      <div className="flex flex-col h-screen">
         <DemoBanner />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar />

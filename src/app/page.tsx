@@ -27,7 +27,7 @@ const steps = [
 
 export default function HomePage() {
   return (
-    <div className="dark">
+    <div>
       <section className="relative overflow-hidden bg-background py-24 sm:py-32">
         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-primary/5" />
         <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 text-center">
